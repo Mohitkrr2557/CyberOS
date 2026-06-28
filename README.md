@@ -70,14 +70,6 @@ cyber-os/
 
 ---
 
-## Roadmap
-
-- [ ] Drag-and-drop file moves between folders
-- [ ] Smoother animations for snap layout and alt-tab
-- [ ] More games and high-score sharing
-
----
-
 ## License
 
 No license specified yet. MIT is a good default if you plan to share or accept contributions.
