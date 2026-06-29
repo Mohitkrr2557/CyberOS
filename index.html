@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Cyber OS - Gaming Hub</title>
-    <link rel="stylesheet" href="style.css?v=3">
+    <link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
 
@@ -84,12 +84,7 @@
             </div>
 
             <div class="taskbar-buttons">
-                <button class="taskbar-btn" data-app="notes">📝</button>
-                <button class="taskbar-btn" data-app="calendar">📅</button>
-                <button class="taskbar-btn" data-app="calc">🧮</button>
-                <button class="taskbar-btn" data-app="ai">🤖</button>
                 <span class="taskbar-separator"></span>
-                <button class="taskbar-btn" data-app="gaminghub">🎮</button>
             </div>
             <div id="system-tray">
                 <span class="tray-icon" id="tray-nightlight" title="Night Light">🌙</span>
@@ -100,14 +95,25 @@
                 <span class="tray-icon" id="tray-overflow-btn" title="Hidden icons">^</span>
             </div>
             <div id="tray-overflow" class="hidden"></div>
-            <div id="show-desktop-btn"></div>
-            <div id="taskbar-preview"></div>
-            <span id="clock" title="Click for calendar">00:00 AM</span>
+        <div id="show-desktop-btn"></div>
+        <div id="taskbar-preview"></div>
+        <span id="clock" title="Click for calendar">00:00 AM</span>
         </div>
 
     </div>
 
+    <!-- Bongo Cat (outside #desktop so it's always in the DOM) -->
+    <div id="bongo-cat">
+        <div id="bongo-key-display">🄰</div>
+        <div class="bongo-body">
+            <div class="bongo-paw bongo-paw-left">🐾</div>
+            <div class="bongo-face">🐱</div>
+            <div class="bongo-paw bongo-paw-right">🐾</div>
+        </div>
+        <div class="bongo-desk">▔▔▔</div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
-    <script src="script.js?v=8"></script>
+    <script src="script.js?v=14"></script>
 </body>
 </html>
