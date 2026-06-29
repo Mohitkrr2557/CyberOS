@@ -100,7 +100,12 @@ let appBadges = {};
 let batteryHistory = [];
 for (let i = 0; i < 10; i++) batteryHistory.push(80 + Math.floor(Math.random() * 15));
 let powerSubmenuOpen = false;
-let _pinnedApps = safeJsonArray('cyberos_pinned');
+const _defaultTaskbarApps = ['notes','calendar','calc','ai','gaminghub','fileexplorer','recyclebin','brave','terminal','powershell','ubuntu','snip','paint','mediaplayer','controlpanel','photos','camera'];
+let _pinnedApps = (function() {
+    var v = safeJsonArray('cyberos_pinned');
+    if (v.length === 0) { v = _defaultTaskbarApps.slice(); localStorage.setItem('cyberos_pinned', JSON.stringify(v)); }
+    return v;
+})();
 let _recycleBin = { items: [] };
 let _feStates = {};
 let _feClipboard = null;
@@ -264,6 +269,8 @@ function bootUser(username) {
         bootScreen.classList.add('hidden');
         desktop.classList.remove('hidden');
         applyUserData(accounts[username].data);
+        window._initParticles();
+        setTimeout(showWelcomeTour, 1500);
         return true;
     } else {
         accounts[username] = { emoji, data: {} };
@@ -276,6 +283,8 @@ function bootUser(username) {
         }
         bootScreen.classList.add('hidden');
         desktop.classList.remove('hidden');
+        window._initParticles();
+        setTimeout(showWelcomeTour, 1500);
         return true;
     }
 }
@@ -457,10 +466,15 @@ function createWindow(type) {
     windowZ++;
     win.style.zIndex = windowZ;
     const title = app.title;
-    win.innerHTML = `<div class="window-header" data-window-id="${id}"><span class="window-title">${title}</span><div class="window-controls"><button class="win-btn win-pin" data-action="pin" data-win="${id}" title="Always on top">\u{1F4CC}</button><button class="win-btn win-min" data-action="minimize" data-win="${id}">\u{2014}</button><button class="win-btn win-max" data-action="maximize" data-win="${id}">\u{25A1}</button><button class="win-btn win-close" data-action="close" data-win="${id}">\u2715</button></div></div><div class="window-content"></div>`;
+    win.innerHTML = `<div class="window-header" data-window-id="${id}"><span class="window-title">${title}</span><div class="window-controls"><button class="win-btn win-desktop" data-action="desktop" data-win="${id}" title="Show on desktop">\u{1F5A5}</button><button class="win-btn win-pin" data-action="pin" data-win="${id}" title="Always on top">\u{1F4CC}</button><button class="win-btn win-min" data-action="minimize" data-win="${id}">\u{2014}</button><button class="win-btn win-max" data-action="maximize" data-win="${id}">\u{25A1}</button><button class="win-btn win-close" data-action="close" data-win="${id}">\u2715</button></div></div><div class="window-content"></div>`;
     desktop.appendChild(win);
     const content = win.querySelector('.window-content');
     app.createContent(content, id);
+    const deskBtnInit = win.querySelector('.win-desktop');
+    if (iconApps.some(a => a.t === type)) {
+        deskBtnInit.style.color = '#33ff33';
+        deskBtnInit.style.background = 'rgba(51,255,51,0.15)';
+    }
     if (!openWindows.includes(id)) openWindows.push(id);
     updateTaskbar();
 
@@ -507,6 +521,22 @@ function createWindow(type) {
     win.querySelector('.win-min').addEventListener('click', () => minimizeWindow(id));
     win.querySelector('.win-max').addEventListener('click', () => maximizeWindow(id));
     win.querySelector('.win-close').addEventListener('click', () => closeWindow(id));
+    win.querySelector('.win-desktop').addEventListener('click', (e) => {
+        e.stopPropagation();
+        const btn = win.querySelector('.win-desktop');
+        const isOnDesktop = iconApps.some(a => a.t === type);
+        if (isOnDesktop) {
+            toggleDesktopIcon(type);
+            btn.style.color = '';
+            btn.style.background = '';
+            showToast('Desktop', 'Removed from desktop', 'info');
+        } else {
+            toggleDesktopIcon(type);
+            btn.style.color = '#33ff33';
+            btn.style.background = 'rgba(51,255,51,0.15)';
+            showToast('Desktop', 'Added to desktop', 'info');
+        }
+    });
     win.querySelector('.win-pin').addEventListener('click', (e) => {
         e.stopPropagation();
         const btn = win.querySelector('.win-pin');
@@ -527,6 +557,51 @@ function createWindow(type) {
             btn.style.background = 'rgba(255,204,0,0.15)';
             showToast('Always on Top', 'Window pinned', 'info');
         }
+    });
+
+    // Window header right-click context menu
+    header.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const existing = document.getElementById('win-cm-' + id);
+        if (existing) existing.remove();
+        const menu = document.createElement('div');
+        menu.id = 'win-cm-' + id;
+        menu.style.cssText = 'position:fixed;z-index:10001;background:var(--bg2);border:1px solid rgba(255,255,255,0.1);border-radius:var(--radius);box-shadow:0 8px 32px var(--shadow);min-width:180px;padding:4px 0;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);';
+        const isOnDesktop = iconApps.some(a => a.t === type);
+        menu.innerHTML =
+            '<div class="win-cm-item" data-action="restore">Restore</div>' +
+            '<div class="win-cm-item" data-action="minimize">Minimize</div>' +
+            '<div class="win-cm-item" data-action="maximize">Maximize</div>' +
+            '<div class="win-cm-sep"></div>' +
+            '<div class="win-cm-item" data-action="desktop">' + (isOnDesktop ? '\u{1F5D1}\uFE0F Remove from desktop' : '\u{1F5A5}\uFE0F Add to desktop') + '</div>' +
+            '<div class="win-cm-sep"></div>' +
+            '<div class="win-cm-item" data-action="close" style="color:var(--danger);">Close</div>';
+        menu.style.left = Math.min(e.clientX, window.innerWidth - 190) + 'px';
+        menu.style.top = Math.min(e.clientY, window.innerHeight - 220) + 'px';
+        document.body.appendChild(menu);
+        const closeMenu = () => menu.remove();
+        menu.querySelectorAll('.win-cm-item').forEach(item => {
+            item.addEventListener('click', () => {
+                menu.remove();
+                const action = item.dataset.action;
+                if (action === 'restore') { win.classList.remove('hidden', 'maximized'); focusWindow(id); }
+                else if (action === 'minimize') minimizeWindow(id);
+                else if (action === 'maximize') maximizeWindow(id);
+                else if (action === 'desktop') {
+                    toggleDesktopIcon(type);
+                    const btn = win.querySelector('.win-desktop');
+                    const nowOnDesktop = iconApps.some(a => a.t === type);
+                    if (btn) {
+                        btn.style.color = nowOnDesktop ? '#33ff33' : '';
+                        btn.style.background = nowOnDesktop ? 'rgba(51,255,51,0.15)' : '';
+                    }
+                    showToast('Desktop', nowOnDesktop ? 'Added to desktop' : 'Removed from desktop', 'info');
+                }
+                else if (action === 'close') closeWindow(id);
+            });
+        });
+        document.addEventListener('click', closeMenu, { once: true });
     });
 
     addResizeHandles(win);
@@ -1101,6 +1176,7 @@ function lockSession() {
     desktop.classList.add('hidden');
     bootScreen.classList.remove('hidden');
     populateBootScreen();
+    if (window._stopParticles) window._stopParticles();
 }
 
 function signOut() {
@@ -1115,6 +1191,7 @@ function signOut() {
     desktop.classList.add('hidden');
     bootScreen.classList.remove('hidden');
     populateBootScreen();
+    if (window._stopParticles) window._stopParticles();
 }
 
 function sleepSystem() {
@@ -1186,6 +1263,149 @@ function lockKeyUpHandler(e) {
     if (e.key === 'Control') lockKeys.ctrl = false;
     if (e.key === 'Alt') lockKeys.alt = false;
 }
+
+// ── Command Palette (Ctrl+K) ──
+(function() {
+    function showCmdPalette() {
+        const existing = document.getElementById('cmd-palette-overlay');
+        if (existing) { existing.remove(); return; }
+        const overlay = document.createElement('div');
+        overlay.id = 'cmd-palette-overlay';
+        overlay.innerHTML =
+            '<div id="cmd-palette">' +
+            '<input id="cmd-palette-input" type="text" placeholder="Search apps, settings, or type a command..." autofocus spellcheck="false">' +
+            '<div id="cmd-palette-results"></div>' +
+            '</div>';
+        document.body.appendChild(overlay);
+
+        const input = document.getElementById('cmd-palette-input');
+        const results = document.getElementById('cmd-palette-results');
+        let selectedIdx = 0;
+
+        const allCmds = [
+            { icon: '\u{1F4C1}', name: 'File Explorer', type: 'app', action: 'fileexplorer' },
+            { icon: '\u{1F5D1}', name: 'Recycle Bin', type: 'app', action: 'recyclebin' },
+            { icon: '\u{1F4DD}', name: 'Notepad', type: 'app', action: 'notes' },
+            { icon: '\u{1F4C5}', name: 'Calendar', type: 'app', action: 'calendar' },
+            { icon: '\u{1F9EE}', name: 'Calculator', type: 'app', action: 'calc' },
+            { icon: '\u2705', name: 'Todo', type: 'app', action: 'todo' },
+            { icon: '\u{1F916}', name: 'AI Chat', type: 'app', action: 'ai' },
+            { icon: '\u{1F3AE}', name: 'Gaming Hub', type: 'app', action: 'gaminghub' },
+            { icon: '\u{1F3C6}', name: 'High Scores', type: 'app', action: 'highscores' },
+            { icon: '\u{1F5BC}', name: 'Wallpapers', type: 'app', action: 'wallpapers' },
+            { icon: '\u2699\uFE0F', name: 'Settings', type: 'app', action: 'settings' },
+            { icon: '\u{1F4CA}', name: 'Task Manager', type: 'app', action: 'taskmgr' },
+            { icon: '\u{1F5A5}', name: 'Terminal', type: 'app', action: 'terminal' },
+            { icon: '\u{1FA9F}', name: 'PowerShell', type: 'app', action: 'powershell' },
+            { icon: '\u{1F427}', name: 'Ubuntu Terminal', type: 'app', action: 'ubuntu' },
+            { icon: '\u{1F3A8}', name: 'Paint', type: 'app', action: 'paint' },
+            { icon: '\u{2702}\uFE0F', name: 'Snipping Tool', type: 'app', action: 'snip' },
+            { icon: '\u{1F3B5}', name: 'Media Player', type: 'app', action: 'mediaplayer' },
+            { icon: '\u{1F981}', name: 'Brave Browser', type: 'app', action: 'brave' },
+            { icon: '\u{1F512}', name: 'Lock', type: 'action', action: 'lock' },
+            { icon: '\u{1F6AA}', name: 'Sign Out', type: 'action', action: 'signout' },
+            { icon: '\u{1F504}', name: 'Restart', type: 'action', action: 'restart' },
+            { icon: '\u{23FB}', name: 'Shut Down', type: 'action', action: 'shutdown' },
+        ];
+
+        function filterResults(query) {
+            const q = query.toLowerCase().trim();
+            if (!q) return allCmds;
+            const parts = q.split(/\s+/).filter(Boolean);
+            return allCmds.filter(cmd => {
+                const name = cmd.name.toLowerCase();
+                return parts.every(p => name.includes(p) || cmd.action.includes(p));
+            });
+        }
+
+        function renderResults(list) {
+            selectedIdx = 0;
+            if (list.length === 0) {
+                results.innerHTML = '<div style="padding:20px;text-align:center;opacity:0.3;font-size:0.85rem;">No results found</div>';
+                return;
+            }
+            const appList = list.filter(c => c.type === 'app');
+            const actionList = list.filter(c => c.type === 'action');
+            let html = '';
+            if (appList.length > 0) {
+                html += '<div class="cmd-palette-section">Apps</div>';
+                appList.forEach((c, i) => {
+                    html += '<div class="cmd-palette-item" data-idx="' + i + '" data-action="' + c.action + '" data-type="app">' +
+                        '<span class="cmd-icon">' + c.icon + '</span>' +
+                        '<span class="cmd-name">' + c.name + '</span>' +
+                        '</div>';
+                });
+            }
+            if (actionList.length > 0) {
+                html += '<div class="cmd-palette-section">System</div>';
+                actionList.forEach((c, i) => {
+                    html += '<div class="cmd-palette-item" data-idx="' + i + '" data-action="' + c.action + '" data-type="action">' +
+                        '<span class="cmd-icon">' + c.icon + '</span>' +
+                        '<span class="cmd-name">' + c.name + '</span>' +
+                        '</div>';
+                });
+            }
+            results.innerHTML = html;
+            updateSelection();
+        }
+
+        function updateSelection() {
+            results.querySelectorAll('.cmd-palette-item').forEach((el, i) => {
+                el.classList.toggle('selected', i === selectedIdx);
+            });
+        }
+
+        function executeSelected() {
+            const selected = results.querySelector('.cmd-palette-item.selected');
+            if (!selected) return;
+            const action = selected.dataset.action;
+            const type = selected.dataset.type;
+            overlay.remove();
+            if (type === 'app') { toggleWindow(action); }
+            else if (action === 'lock') { lockSession(); }
+            else if (action === 'signout') { signOut(); }
+            else if (action === 'restart') { restartSystem(); }
+            else if (action === 'shutdown') { shutdownSystem(); }
+        }
+
+        input.addEventListener('input', () => {
+            const list = filterResults(input.value);
+            renderResults(list);
+        });
+
+        input.addEventListener('keydown', (e) => {
+            const items = results.querySelectorAll('.cmd-palette-item');
+            if (e.key === 'ArrowDown') { e.preventDefault(); selectedIdx = Math.min(items.length - 1, selectedIdx + 1); updateSelection(); }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); selectedIdx = Math.max(0, selectedIdx - 1); updateSelection(); }
+            else if (e.key === 'Enter') { e.preventDefault(); executeSelected(); }
+            else if (e.key === 'Escape') { overlay.remove(); }
+        });
+
+        results.addEventListener('mousedown', (e) => {
+            const item = e.target.closest('.cmd-palette-item');
+            if (!item) return;
+            overlay.remove();
+            const action = item.dataset.action;
+            const type = item.dataset.type;
+            if (type === 'app') toggleWindow(action);
+            else if (action === 'lock') lockSession();
+            else if (action === 'signout') signOut();
+            else if (action === 'restart') restartSystem();
+            else if (action === 'shutdown') shutdownSystem();
+        });
+
+        overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) overlay.remove(); });
+        input.focus();
+        renderResults(allCmds);
+    }
+
+    document.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+            e.preventDefault();
+            showCmdPalette();
+        }
+    });
+})();
 
 // Alt+Tab
 document.addEventListener('keydown', (e) => {
@@ -1541,6 +1761,91 @@ createWindow = function(type) {
     return win;
 };
 
+// ── Interactive Desktop Particle Starfield ──
+(function() {
+    let pc, pCtx, pW, pH, particles = [], mouse = {x:0,y:0};
+    let pRunning = false, pFrame;
+
+    function initParticles() {
+        const existing = document.getElementById('particle-starfield');
+        if (existing) existing.remove();
+        const c = document.createElement('canvas');
+        c.id = 'particle-starfield';
+        c.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;pointer-events:none;';
+        document.getElementById('desktop').appendChild(c);
+        pc = c; pCtx = c.getContext('2d');
+        resize();
+        particles = [];
+        for (let i = 0; i < 120; i++) {
+            particles.push({
+                x: Math.random() * pW, y: Math.random() * pH,
+                vx: (Math.random() - 0.5) * 0.3, vy: (Math.random() - 0.5) * 0.3,
+                size: Math.random() * 2 + 0.5, life: Math.random()
+            });
+        }
+        pRunning = true;
+        drawParticles();
+    }
+
+    function resize() {
+        if (!pc) return;
+        const dpr = window.devicePixelRatio || 1;
+        pW = window.innerWidth; pH = window.innerHeight;
+        pc.width = pW * dpr; pc.height = pH * dpr;
+        pc.style.width = pW + 'px'; pc.style.height = pH + 'px';
+        pCtx.scale(dpr, dpr);
+    }
+
+    function drawParticles() {
+        if (!pRunning) return;
+        pCtx.clearRect(0, 0, pW, pH);
+        for (let i = 0; i < particles.length; i++) {
+            const p = particles[i];
+            p.x += p.vx + (mouse.x - pW/2) * 0.0001;
+            p.y += p.vy + (mouse.y - pH/2) * 0.0001;
+            p.life += 0.003;
+            if (p.x < 0) p.x = pW;
+            if (p.x > pW) p.x = 0;
+            if (p.y < 0) p.y = pH;
+            if (p.y > pH) p.y = 0;
+            const alpha = 0.3 + 0.7 * (0.5 + 0.5 * Math.sin(p.life * 3 + i));
+            const dist = Math.hypot(mouse.x - p.x, mouse.y - p.y);
+            const glow = dist < 150 ? 1 - dist / 150 : 0;
+            pCtx.beginPath();
+            pCtx.arc(p.x, p.y, p.size + glow * 1.5, 0, Math.PI * 2);
+            pCtx.fillStyle = glow > 0
+                ? 'rgba(255, 107, 53, ' + (alpha * (0.5 + glow * 0.5)) + ')'
+                : 'rgba(255, 217, 61, ' + (alpha * 0.4) + ')';
+            pCtx.fill();
+            // Draw connections between close particles
+            for (let j = i + 1; j < particles.length; j++) {
+                const q = particles[j];
+                const d = Math.hypot(p.x - q.x, p.y - q.y);
+                if (d < 120) {
+                    pCtx.beginPath();
+                    pCtx.moveTo(p.x, p.y);
+                    pCtx.lineTo(q.x, q.y);
+                    pCtx.strokeStyle = 'rgba(255, 107, 53, ' + (0.06 * (1 - d / 120)) + ')';
+                    pCtx.lineWidth = 0.5;
+                    pCtx.stroke();
+                }
+            }
+        }
+        pFrame = requestAnimationFrame(drawParticles);
+    }
+
+    function stopParticles() { pRunning = false; if (pFrame) cancelAnimationFrame(pFrame); const e = document.getElementById('particle-starfield'); if (e) e.remove(); }
+
+    window._initParticles = function() {
+        if (document.getElementById('particle-starfield')) stopParticles();
+        initParticles();
+    };
+    window._stopParticles = stopParticles;
+
+    window.addEventListener('resize', resize);
+    document.addEventListener('mousemove', function(e) { mouse.x = e.clientX; mouse.y = e.clientY; });
+})();
+
 // Re-register apps that were already opened
 bootUser = (function(orig) {
     return function(username, password) {
@@ -1847,50 +2152,133 @@ const apps = {
         title: '\u{1F9EE} Calculator',
         icon: '\u{1F9EE}',
         createContent: (el) => {
-            el.style.padding = '4px';
-            el.style.display = 'flex';
-            el.style.flexDirection = 'column';
-            const display = document.createElement('input');
-            display.type = 'text';
-            display.readOnly = true;
-            display.style.cssText = 'width:100%;padding:8px;background:rgba(0,0,0,0.4);color:#33ff33;border:1px solid rgba(51,255,51,0.3);border-radius:4px;font-family:monospace;font-size:1.1rem;text-align:right;box-sizing:border-box;margin-bottom:4px;outline:none;';
-            display.value = '0';
-            const grid = document.createElement('div');
-            grid.style.cssText = 'display:grid;grid-template-columns:repeat(5,1fr);gap:3px;';
-            const btns = [
-                'sin','cos','tan','log','ln',
-                'sqrt','x2','x3','xn','n!',
-                'pi','e','(','),','±',
-                '1/x','7','8','9','/',
-                '4','5','6','*',
-                '1','2','3','-',
-                '0','.','C','=','+'
-            ];
-            btns.forEach(label => {
-                const btn = document.createElement('button');
-                btn.textContent = label;
-                btn.style.cssText = 'padding:6px 0;background:rgba(51,255,51,0.1);border:1px solid rgba(51,255,51,0.2);color:#33ff33;border-radius:3px;cursor:pointer;font-family:monospace;font-size:0.85rem;';
-                if (label === '=') btn.style.background = 'rgba(51,255,51,0.3)';
-                if (label === 'C') btn.style.color = '#ff6666';
-                btn.onclick = () => {
-                    if (label === 'C') { display.value = '0'; return; }
-                    if (label === '=') {
-                        try {
-                            let expr = display.value;
-                            expr = expr.replace(/sin/g,'Math.sin').replace(/cos/g,'Math.cos').replace(/tan/g,'Math.tan').replace(/log/g,'Math.log10').replace(/ln/g,'Math.log').replace(/sqrt/g,'Math.sqrt').replace(/x2/g,'**2').replace(/x3/g,'**3').replace(/xn/g,'**').replace(/n!/g,'*').replace(/π/g,'Math.PI').replace(/pi/g,'Math.PI').replace(/e(?![xp])/g,'Math.E').replace(/±/g,'*-1').replace(/1\/x/g,'1/');
-                            const result = Function('"use strict";return (' + expr + ')')();
-                            display.value = result.toString();
-                        } catch { display.value = 'Error'; }
-                        return;
+            el.style.cssText = 'padding:0;display:flex;flex-direction:column;background:#1c1c1e;user-select:none;overflow:hidden;';
+            var displayVal = '0', operand = null, operator = null, waiting = false, memory = 0;
+
+            var display = document.createElement('div');
+            display.style.cssText = 'padding:20px 14px 10px;text-align:right;font-size:2.7rem;font-weight:300;color:#fff;background:#1c1c1e;font-family:-apple-system,Helvetica Neue,sans-serif;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-height:3.4rem;line-height:1;flex-shrink:0;';
+            display.textContent = '0';
+
+            function fmt(n) {
+                if (!isFinite(n) || isNaN(n)) return 'Error';
+                var s = String(n);
+                if (s.length > 14) { try { s = parseFloat(n).toExponential(6); } catch(e) { s = 'Error'; } }
+                return s;
+            }
+            function upd() { display.textContent = displayVal; }
+            function dig(d) {
+                if (waiting) { displayVal = String(d); waiting = false; }
+                else { displayVal = displayVal === '0' ? String(d) : displayVal + d; }
+                upd();
+            }
+            function dec() {
+                if (waiting) { displayVal = '0.'; waiting = false; upd(); return; }
+                if (displayVal.indexOf('.') === -1) displayVal += '.';
+                upd();
+            }
+            function clr() { displayVal = '0'; operand = null; operator = null; waiting = false; upd(); }
+            function unary(fn) {
+                var cur = parseFloat(displayVal);
+                var r;
+                switch (fn) {
+                    case '±': r = -cur; break;
+                    case '%': r = cur / 100; break;
+                    case 'sin': r = Math.sin(cur * Math.PI / 180); break;
+                    case 'cos': r = Math.cos(cur * Math.PI / 180); break;
+                    case 'tan': r = Math.tan(cur * Math.PI / 180); break;
+                    case 'ln': r = Math.log(cur); break;
+                    case 'log': r = Math.log10(cur); break;
+                    case '√': r = Math.sqrt(cur); break;
+                    case 'x²': r = cur * cur; break;
+                    case 'x³': r = cur * cur * cur; break;
+                    case '1/x': r = cur === 0 ? 'Error' : 1 / cur; break;
+                    case 'n!':
+                        if (cur < 0 || !Number.isInteger(cur)) { r = 'Error'; break; }
+                        var f = 1;
+                        for (var i = 2; i <= cur; i++) f *= i;
+                        r = f;
+                        break;
+                    case 'π': r = Math.PI; break;
+                    case 'e': r = Math.E; break;
+                    default: r = cur;
+                }
+                if (r === 'Error') { displayVal = 'Error'; upd(); return; }
+                displayVal = fmt(r);
+                if (fn !== '±' && fn !== '%' && fn !== 'π' && fn !== 'e') waiting = true;
+                upd();
+            }
+            function op(next) {
+                var cur = parseFloat(displayVal);
+                if (operator && !waiting) {
+                    var r;
+                    switch (operator) {
+                        case '+': r = operand + cur; break;
+                        case '−': r = operand - cur; break;
+                        case '×': r = operand * cur; break;
+                        case '÷': r = cur === 0 ? 'Error' : operand / cur; break;
+                        default: r = cur;
                     }
-                    if (label === '±') { display.value = display.value.startsWith('-') ? display.value.slice(1) : '-' + display.value; return; }
-                    if (label === '1/x') { try { display.value = (1 / parseFloat(display.value)).toString(); } catch { display.value = 'Error'; } return; }
-                    if (display.value === '0' && !'+-*/.'.includes(label)) display.value = '';
-                    display.value += label === 'n!' ? '!' : label === 'pi' || label === 'π' ? 'π' : label === 'e' ? 'e' : label === 'sqrt' ? 'sqrt(' : label === 'x2' ? '**2' : label === 'x3' ? '**3' : label === 'xn' ? '**' : label === 'sin' ? 'sin(' : label === 'cos' ? 'cos(' : label === 'tan' ? 'tan(' : label === 'log' ? 'log(' : label === 'ln' ? 'ln(' : label;
-                };
-                grid.appendChild(btn);
-            });
+                    if (r === 'Error') { displayVal = 'Error'; operand = null; operator = null; waiting = true; upd(); return; }
+                    displayVal = fmt(r);
+                    operand = r;
+                } else { operand = cur; }
+                if (next === '=') { operator = null; waiting = true; }
+                else { operator = next; waiting = true; }
+                upd();
+            }
+
+            function btn(label, type, opt) {
+                var b = document.createElement('button');
+                b.textContent = label;
+                var base = type === 'op' ? '#ff9500' : type === 'func' ? '#d4d4d2' : '#333';
+                var tc = type === 'op' ? '#fff' : type === 'func' ? '#000' : '#fff';
+                var fs = type === 'op' || type === 'func' ? '1.3rem' : '1.5rem';
+                var style = 'margin:0;padding:0;border:none;cursor:pointer;font-size:' + fs + ';font-weight:' + (type === 'op' ? '500' : '300') + ';background:' + base + ';color:' + tc + ';display:flex;align-items:center;justify-content:center;outline:none;transition:filter 0.1s;height:48px;';
+                if (opt && opt.colspan === 2) style += 'grid-column:span 2;';
+                if (label === '=') style += 'background:#ff9500;color:#fff;';
+                b.style.cssText = style;
+                b.onmouseenter = function() { this.style.filter = 'brightness(1.15)'; };
+                b.onmouseleave = function() { this.style.filter = 'brightness(1)'; };
+                b.onmousedown = function() { this.style.filter = 'brightness(0.85)'; };
+                b.onmouseup = function() { this.style.filter = 'brightness(1.15)'; };
+                return b;
+            }
+
             el.appendChild(display);
+
+            // Main button grid
+            var grid = document.createElement('div');
+            grid.style.cssText = 'display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:#1c1c1e;padding:4px 8px 8px;flex:1;';
+
+            var rows = [
+                [{ l:'C', t:'func' }, { l:'±', t:'func' }, { l:'%', t:'func' }, { l:'÷', t:'op' }],
+                [{ l:'7', t:'num' }, { l:'8', t:'num' }, { l:'9', t:'num' }, { l:'×', t:'op' }],
+                [{ l:'4', t:'num' }, { l:'5', t:'num' }, { l:'6', t:'num' }, { l:'−', t:'op' }],
+                [{ l:'1', t:'num' }, { l:'2', t:'num' }, { l:'3', t:'num' }, { l:'+', t:'op' }],
+                [{ l:'0', t:'num', colspan:2 }, { l:'.', t:'num' }, { l:'=', t:'op' }],
+            ];
+
+            rows.forEach(function(row) {
+                row.forEach(function(cell) {
+                    var b = btn(cell.l, cell.t, cell);
+                    b.onclick = function() {
+                        if (cell.l === 'C') { clr(); return; }
+                        if (cell.t === 'op') {
+                            if (cell.l === '=') op('=');
+                            else op(cell.l);
+                            return;
+                        }
+                        if (cell.t === 'func') {
+                            unary(cell.l);
+                            return;
+                        }
+                        if (cell.l === '.') { dec(); return; }
+                        dig(cell.l);
+                    };
+                    grid.appendChild(b);
+                });
+            });
+
             el.appendChild(grid);
         }
     },
@@ -1905,13 +2293,13 @@ const apps = {
             const log = document.createElement('div');
             log.id = 'ai-log-' + id;
             log.style.cssText = 'flex:1;overflow-y:auto;background:rgba(0,0,0,0.2);border-radius:4px;padding:8px;font-size:0.85rem;';
-            log.innerHTML = '<p style="color:#88ccff;">Welcome to AI Chat! Type a message below.</p>';
+            log.innerHTML = '<p style="color:#88ccff;">Welcome to AI Chat!</p>';
             const inputRow = document.createElement('div');
             inputRow.style.display = 'flex';
             inputRow.style.gap = '4px';
             const input = document.createElement('input');
             input.type = 'text';
-            input.placeholder = 'Type a message...';
+            input.placeholder = 'Ask anything...';
             input.style.cssText = 'flex:1;background:rgba(0,0,0,0.3);color:#33ff33;border:1px solid rgba(51,255,51,0.3);padding:4px 8px;border-radius:4px;font-family:monospace;outline:none;';
             const sendBtn = document.createElement('button');
             sendBtn.textContent = 'Send';
@@ -1920,27 +2308,47 @@ const apps = {
             inputRow.appendChild(sendBtn);
             el.appendChild(log);
             el.appendChild(inputRow);
-            const responses = [
-                "Interesting! Tell me more about that.", "I'm processing that information...", "That's a great question!",
-                "Let me think about that...", "Here's what I know about that topic.", "I can help you with that.",
-                "That's fascinating!", "I see what you mean.", "Good point!", "Let me look that up for you."
-            ];
+            const API_KEY = 'AQ.Ab8RN6JruVd2ICV3ejhE3kyjY_NrVU7MjDda2pXn2vbrIGddoA';
+            const MODEL = 'gemini-flash-latest';
+            function addMsg(text, color) {
+                const p = document.createElement('p');
+                p.textContent = text;
+                p.style.color = color;
+                p.style.whiteSpace = 'pre-wrap';
+                log.appendChild(p);
+                log.scrollTop = log.scrollHeight;
+            }
             function sendMessage() {
                 const text = input.value.trim();
                 if (!text) return;
-                const userP = document.createElement('p');
-                userP.textContent = 'You: ' + text;
-                userP.style.color = '#88ff88';
-                log.appendChild(userP);
+                addMsg('You: ' + text, '#88ff88');
                 input.value = '';
-                setTimeout(() => {
-                    const aiP = document.createElement('p');
-                    aiP.textContent = responses[Math.floor(Math.random() * responses.length)];
-                    aiP.style.color = '#88ccff';
-                    log.appendChild(aiP);
-                    log.scrollTop = log.scrollHeight;
-                }, 500 + Math.random() * 1000);
+                sendBtn.disabled = true;
+                sendBtn.textContent = '...';
+                const thinkP = document.createElement('p');
+                thinkP.textContent = 'Gemini: thinking...';
+                thinkP.style.color = '#88ccff';
+                log.appendChild(thinkP);
                 log.scrollTop = log.scrollHeight;
+                fetch('https://generativelanguage.googleapis.com/v1beta/models/' + MODEL + ':generateContent', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-goog-api-key': API_KEY },
+                    body: JSON.stringify({
+                        contents: [{ parts: [{ text: text }] }]
+                    })
+                }).then(r => r.json()).then(data => {
+                    thinkP.remove();
+                    const reply = data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts
+                        ? data.candidates[0].content.parts.map(p => p.text).join('')
+                        : 'No response.';
+                    addMsg('Gemini: ' + reply, '#88ccff');
+                }).catch(err => {
+                    thinkP.remove();
+                    addMsg('Gemini: Error - ' + err.message, '#ff6666');
+                }).finally(() => {
+                    sendBtn.disabled = false;
+                    sendBtn.textContent = 'Send';
+                });
             }
             sendBtn.onclick = sendMessage;
             input.addEventListener('keydown', e => { if (e.key === 'Enter') sendMessage(); });
@@ -2011,6 +2419,22 @@ const apps = {
                     var html = '<div style="margin-bottom:8px;font-weight:bold;">Accent Color</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">';
                     accentColors.forEach(function(c){html+='<div style="width:28px;height:28px;background:'+c+';border-radius:4px;cursor:pointer;border:2px solid '+(c===currentAccent?'var(--fg)':'transparent')+';" data-accent="'+c+'"></div>';});
                     html += '</div>';
+                    var cursorThemes = [
+                        { id:'default', label:'Default' },
+                        { id:'retro-pixel', label:'Retro Pixel' },
+                        { id:'retro-hand', label:'Retro Hand' },
+                        { id:'retro-cross', label:'Retro Crosshair' },
+                        { id:'retro-text', label:'Retro I-beam' },
+                    ];
+                    var currentCursor = localStorage.getItem('cyberos_cursor') || 'default';
+                    html += '<div style="margin:8px 0;font-weight:bold;">\u{1F431} Cursor Theme</div><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;">';
+                    cursorThemes.forEach(function(t) {
+                        var sel = t.id === currentCursor ? 'border-color:var(--fg);background:rgba(255,255,255,0.1);' : 'border-color:var(--border);background:transparent;';
+                        html += '<div class="cursor-option" data-cursor="' + t.id + '" style="flex:1;min-width:70px;padding:8px 6px;border:2px solid ' + (t.id === currentCursor ? 'var(--fg)' : 'var(--border)') + ';border-radius:6px;text-align:center;cursor:pointer;transition:all 0.15s;font-size:0.75rem;background:' + (t.id === currentCursor ? 'rgba(255,255,255,0.08)' : 'transparent') + ';">' + t.label + '</div>';
+                    });
+                    html += '</div>';
+                    var bongoVis = localStorage.getItem('cyberos_bongo_enabled') !== 'false';
+                    html += '<div class="setting-row" style="border:none;"><span>\u{1F431} Bongo Cat</span><label><input type="checkbox" ' + (bongoVis ? 'checked' : '') + ' id="bongo-toggle"> <span style="font-size:0.7rem;">' + (bongoVis ? 'Visible' : 'Hidden') + '</span></label></div>';
                     var currentBg = document.getElementById('desktop').style.background || '#020813';
                     var hexBg = '#020813';
                     try { var t = document.getElementById('desktop').style.background; if (t && t.startsWith('#')) hexBg = t; } catch(e){}
@@ -2037,6 +2461,25 @@ const apps = {
                             el2.style.borderColor='var(--fg)';
                         };
                     });
+                    content.querySelectorAll('.cursor-option').forEach(function(el2){
+                        el2.onclick = function(){
+                            var cur = el2.dataset.cursor;
+                            localStorage.setItem('cyberos_cursor', cur);
+                            document.body.className = document.body.className.replace(/cursor-\S+/g, '').trim();
+                            if (cur !== 'default') document.body.classList.add('cursor-' + cur);
+                            content.querySelectorAll('.cursor-option').forEach(function(s){ s.style.borderColor = 'var(--border)'; s.style.background = 'transparent'; });
+                            el2.style.borderColor = 'var(--fg)';
+                            el2.style.background = 'rgba(255,255,255,0.08)';
+                        };
+                    });
+                    var bongoCb = content.querySelector('#bongo-toggle');
+                    if (bongoCb) {
+                        bongoCb.onchange = function() {
+                            var vis = bongoCb.checked;
+                            toggleBongoCat(vis);
+                            bongoCb.nextElementSibling.textContent = vis ? 'Visible' : 'Hidden';
+                        };
+                    }
                 } else if (page === 'display') {
                     var isLight = document.body.classList.contains('light-theme');
                     var transparency = localStorage.getItem('cyberos_transparency') || '85';
@@ -2116,7 +2559,18 @@ const apps = {
                 } else if (page === 'about') {
                     var accounts = loadAccounts();
                     var ud = currentUser && accounts[currentUser] ? accounts[currentUser] : {};
-                    content.innerHTML = '<div class="setting-row"><span>User</span><span style="font-size:0.8rem;">'+escapeHtml((ud.emoji||'')+' '+(currentUser || ''))+'</span></div><div class="setting-row"><span>OS Version</span><span style="font-size:0.8rem;">Cyber OS v2.0</span></div><div class="setting-row"><span>Windows</span><span style="font-size:0.8rem;">'+escapeHtml(window.navigator.platform||'PC')+'</span></div><div class="setting-row"><span>Resolution</span><span style="font-size:0.8rem;">'+window.innerWidth+'\u00D7'+window.innerHeight+'</span></div>';
+                    content.innerHTML = '<div class="setting-row"><span>User</span><span style="font-size:0.8rem;">'+escapeHtml((ud.emoji||'')+' '+(currentUser || ''))+'</span></div><div class="setting-row"><span>OS Version</span><span style="font-size:0.8rem;">Cyber OS v2.0</span></div><div class="setting-row"><span>Windows</span><span style="font-size:0.8rem;">'+escapeHtml(window.navigator.platform||'PC')+'</span></div><div class="setting-row"><span>Resolution</span><span style="font-size:0.8rem;">'+window.innerWidth+'\u00D7'+window.innerHeight+'</span></div><div class="setting-row" style="border:none;"><span>\u{1F3AF} Tour</span><button id="restart-tour-btn" style="margin:0;padding:4px 14px;font-size:0.8rem;background:var(--accent);color:#fff;border:none;border-radius:5px;cursor:pointer;">Restart welcome tour</button></div>';
+                    setTimeout(function() {
+                        var rtBtn = document.getElementById('restart-tour-btn');
+                        if (rtBtn) rtBtn.onclick = function() {
+                            localStorage.removeItem('cyberos_tour_done');
+                            document.querySelectorAll('.tour-highlight').forEach(function(el) { el.classList.remove('tour-highlight'); });
+                            var existing = document.getElementById('tour-toast');
+                            if (existing) existing.remove();
+                            showWelcomeTour();
+                            showToast('Tour', 'Tour restarted!', 'info');
+                        };
+                    }, 0);
                 } else if (page === 'widgets') {
                     var clockVis = localStorage.getItem('cyberos_widget_clock_visible') !== 'false';
                     var calVis = localStorage.getItem('cyberos_widget_calendar_visible') !== 'false';
@@ -2124,6 +2578,7 @@ const apps = {
                     var clockTrans = localStorage.getItem('cyberos_widget_clock_transparent') === 'true';
                     var calTrans = localStorage.getItem('cyberos_widget_calendar_transparent') === 'true';
                     var mediaTrans = localStorage.getItem('cyberos_widget_media_transparent') === 'true';
+                    var currentTheme = localStorage.getItem('cyberos_widget_theme') || 'cyber';
                     content.innerHTML = '<div style="margin-bottom:8px;font-weight:bold;">Widget Visibility</div>'
                         + '<div class="setting-row"><span>\u{1F570} Clock</span><label><input type="checkbox" ' + (clockVis?'checked':'') + ' id="wg-clock-vis"> <span style="font-size:0.7rem;">Visible</span></label></div>'
                         + '<div class="setting-row"><span>\u{1F4C5} Calendar</span><label><input type="checkbox" ' + (calVis?'checked':'') + ' id="wg-cal-vis"> <span style="font-size:0.7rem;">Visible</span></label></div>'
@@ -2131,7 +2586,17 @@ const apps = {
                         + '<div style="margin:12px 0 8px;font-weight:bold;">Widget Transparency</div>'
                         + '<div class="setting-row"><span>\u{1F570} Clock</span><label><input type="checkbox" ' + (clockTrans?'checked':'') + ' id="wg-clock-trans"> <span style="font-size:0.7rem;">Transparent</span></label></div>'
                         + '<div class="setting-row"><span>\u{1F4C5} Calendar</span><label><input type="checkbox" ' + (calTrans?'checked':'') + ' id="wg-cal-trans"> <span style="font-size:0.7rem;">Transparent</span></label></div>'
-                        + '<div class="setting-row" style="border:none;"><span>\u{1F3B5} Media Player</span><label><input type="checkbox" ' + (mediaTrans?'checked':'') + ' id="wg-media-trans"> <span style="font-size:0.7rem;">Transparent</span></label></div>';
+                        + '<div class="setting-row" style="border:none;"><span>\u{1F3B5} Media Player</span><label><input type="checkbox" ' + (mediaTrans?'checked':'') + ' id="wg-media-trans"> <span style="font-size:0.7rem;">Transparent</span></label></div>'
+                        + '<div style="margin:12px 0 8px;font-weight:bold;">Widget Theme</div>'
+                        + '<div style="display:flex;gap:8px;flex-wrap:wrap;" id="wg-theme-options">'
+                        + Object.entries(widgetThemes).map(function(e) {
+                            var k = e[0], t = e[1];
+                            var sel = k === currentTheme ? 'border-color:var(--fg);background:rgba(255,255,255,0.1);' : '';
+                            return '<div class="wg-theme-option" data-theme="' + k + '" style="flex:1;min-width:60px;padding:10px 6px;border:2px solid rgba(255,255,255,0.15);border-radius:8px;text-align:center;cursor:pointer;transition:all 0.15s;' + sel + '">'
+                                + '<div style="font-size:1.2rem;margin-bottom:2px;">' + t.icon + '</div>'
+                                + '<div style="font-size:0.6rem;opacity:0.7;">' + t.name + '</div>'
+                                + '</div>';
+                        }).join('') + '</div>';
                     function bindWidgetSetting(id, key) {
                         var cb = content.querySelector('#' + id);
                         if (cb) {
@@ -2147,6 +2612,21 @@ const apps = {
                     bindWidgetSetting('wg-clock-trans', 'cyberos_widget_clock_transparent');
                     bindWidgetSetting('wg-cal-trans', 'cyberos_widget_calendar_transparent');
                     bindWidgetSetting('wg-media-trans', 'cyberos_widget_media_transparent');
+                    setTimeout(function() {
+                        content.querySelectorAll('.wg-theme-option').forEach(function(opt) {
+                            opt.onclick = function() {
+                                var theme = opt.dataset.theme;
+                                localStorage.setItem('cyberos_widget_theme', theme);
+                                content.querySelectorAll('.wg-theme-option').forEach(function(o) {
+                                    o.style.borderColor = 'rgba(255,255,255,0.15)';
+                                    o.style.background = 'transparent';
+                                });
+                                opt.style.borderColor = 'var(--fg)';
+                                opt.style.background = 'rgba(255,255,255,0.1)';
+                                applyWidgetSettings();
+                            };
+                        });
+                    }, 0);
                 }
             }
             Object.entries(pages).forEach(function(_a){
@@ -4296,16 +4776,30 @@ const apps = {
             el.appendChild(video);
             const canvas = document.createElement('canvas');
             canvas.width = 300; canvas.height = 100;
-            canvas.style.cssText = 'border:1px solid rgba(51,255,51,0.2);border-radius:4px;background:#000;width:100%;';
+            canvas.style.cssText = 'border:1px solid rgba(255,255,255,0.08);border-radius:6px;background:rgba(0,0,0,0.3);width:100%;';
             el.appendChild(canvas);
             const ctx = canvas.getContext('2d');
             const info = document.createElement('div');
             info.style.cssText = 'text-align:center;font-size:0.75rem;opacity:0.7;';
             el.appendChild(info);
+            const volumeRow = document.createElement('div');
+            volumeRow.style.cssText = 'display:flex;align-items:center;gap:6px;width:100%;';
+            const volIcon = document.createElement('span');
+            volIcon.textContent = '\u{1F50A}';
+            volIcon.style.cssText = 'font-size:0.85rem;';
+            const volSlider = document.createElement('input');
+            volSlider.type = 'range';
+            volSlider.min = 0; volSlider.max = 100; volSlider.value = mediaState.volume;
+            volSlider.style.cssText = 'flex:1;accent-color:var(--accent);height:4px;';
+            const volLabel = document.createElement('span');
+            volLabel.textContent = mediaState.volume + '%';
+            volLabel.style.cssText = 'font-size:0.7rem;min-width:30px;text-align:right;opacity:0.6;';
+            volumeRow.append(volIcon, volSlider, volLabel);
+            el.appendChild(volumeRow);
             const progress = document.createElement('div');
-            progress.style.cssText = 'width:100%;height:4px;background:rgba(51,255,51,0.1);border-radius:2px;overflow:hidden;';
+            progress.style.cssText = 'width:100%;height:4px;background:rgba(255,255,255,0.06);border-radius:2px;overflow:hidden;cursor:pointer;';
             const fill = document.createElement('div');
-            fill.style.cssText = 'width:0%;height:100%;background:#33ff33;border-radius:2px;transition:width 0.5s;';
+            fill.style.cssText = 'width:0%;height:100%;background:var(--accent);border-radius:2px;transition:width 0.3s;';
             progress.appendChild(fill);
             el.appendChild(progress);
             const controls = document.createElement('div');
@@ -4315,69 +4809,184 @@ const apps = {
             btnPrev.style.cssText = 'margin:0;padding:4px 12px;font-size:1rem;';
             const btnPlay = document.createElement('button');
             btnPlay.textContent = '\u{25B6}';
-            btnPlay.style.cssText = 'margin:0;padding:4px 12px;font-size:1rem;background:rgba(51,255,51,0.2);';
+            btnPlay.style.cssText = 'margin:0;padding:4px 12px;font-size:1rem;background:rgba(255,107,53,0.15);';
             const btnStop = document.createElement('button');
             btnStop.textContent = '\u{23F9}';
             btnStop.style.cssText = 'margin:0;padding:4px 12px;font-size:1rem;';
             const btnNext = document.createElement('button');
             btnNext.textContent = '\u{23ED}';
             btnNext.style.cssText = 'margin:0;padding:4px 12px;font-size:1rem;';
-            controls.appendChild(btnPrev);
-            controls.appendChild(btnPlay);
-            controls.appendChild(btnStop);
-            controls.appendChild(btnNext);
+            controls.append(btnPrev, btnPlay, btnStop, btnNext);
             el.appendChild(controls);
+            const waveTypeEl = document.createElement('div');
+            waveTypeEl.style.cssText = 'display:flex;gap:4px;font-size:0.7rem;align-items:center;opacity:0.5;';
+            waveTypeEl.textContent = 'Wave: ';
+            el.appendChild(waveTypeEl);
+
+            let audioCtx, oscillator, gainNode, analyser, animFrame;
+            const waves = ['sine', 'sawtooth', 'square', 'triangle'];
+            let currentWave = 0;
+
+            function startAudio() {
+                if (!audioCtx) {
+                    try {
+                        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                        analyser = audioCtx.createAnalyser();
+                        analyser.fftSize = 256;
+                        gainNode = audioCtx.createGain();
+                        gainNode.gain.value = mediaState.volume / 100;
+                        gainNode.connect(analyser);
+                        analyser.connect(audioCtx.destination);
+                    } catch(e) { showToast('Media Player', 'Audio not supported', 'error'); return false; }
+                }
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                return true;
+            }
+
+            function stopOsc() {
+                if (oscillator) {
+                    try { oscillator.stop(); } catch(e) {}
+                    oscillator.disconnect();
+                    oscillator = null;
+                }
+                if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null; }
+            }
+
+            function playTrack(index) {
+                mediaState.trackIndex = ((index % mediaState.tracks.length) + mediaState.tracks.length) % mediaState.tracks.length;
+                mediaState.currentTrack = mediaState.tracks[mediaState.trackIndex];
+                mediaState.progress = 0;
+                stopOsc();
+                if (!startAudio()) return;
+                const freq = 220 + mediaState.trackIndex * 110;
+                oscillator = audioCtx.createOscillator();
+                oscillator.type = waves[currentWave];
+                oscillator.frequency.value = freq;
+                oscillator.connect(gainNode);
+                oscillator.start();
+                mediaState.playing = true;
+                syncPlayerUI();
+                waveTypeEl.innerHTML = 'Wave: <span style="font-weight:600;">' + waves[currentWave] + '</span>';
+                drawViz();
+            }
+
+            function drawViz() {
+                if (!analyser || !mediaState.playing) return;
+                const bufferLength = analyser.frequencyBinCount;
+                const dataArray = new Uint8Array(bufferLength);
+                analyser.getByteTimeDomainData(dataArray);
+                ctx.fillStyle = 'rgba(0,0,0,0.15)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.lineWidth = 2;
+                ctx.strokeStyle = '#ff6b35';
+                ctx.beginPath();
+                const sliceWidth = canvas.width / bufferLength;
+                let x = 0;
+                for (let i = 0; i < bufferLength; i++) {
+                    const v = dataArray[i] / 128.0;
+                    const y = v * canvas.height / 2;
+                    if (i === 0) ctx.lineTo(x, y);
+                    else ctx.lineTo(x, y);
+                    x += sliceWidth;
+                }
+                ctx.lineTo(canvas.width, canvas.height / 2);
+                ctx.stroke();
+                fill.style.width = mediaState.progress + '%';
+                mediaState.progress += 0.05;
+                if (mediaState.progress >= 100) {
+                    mediaState.progress = 0;
+                    playTrack(mediaState.trackIndex + 1);
+                    return;
+                }
+                animFrame = requestAnimationFrame(drawViz);
+            }
+
             function isVideoMode() { return video.style.display !== 'none' && video.src; }
+
             function syncPlayerUI() {
                 if (isVideoMode()) {
                     info.textContent = 'Now Playing: ' + (mediaState.currentTrack || 'Video');
                     btnPlay.textContent = video.paused ? '\u{25B6}' : '\u{23F8}';
                     fill.style.width = video.duration ? (video.currentTime / video.duration * 100) + '%' : '0%';
                 } else {
-                    info.textContent = 'Now Playing: ' + mediaState.tracks[mediaState.trackIndex];
+                    info.textContent = 'Now Playing: ' + mediaState.currentTrack;
                     btnPlay.textContent = mediaState.playing ? '\u{23F8}' : '\u{25B6}';
-                    fill.style.width = mediaState.progress + '%';
                 }
             }
+
+            progress.addEventListener('click', (e) => {
+                const r = progress.getBoundingClientRect();
+                const pct = (e.clientX - r.left) / r.width;
+                mediaState.progress = pct * 100;
+                if (oscillator) {
+                    const freq = 220 + mediaState.trackIndex * 110;
+                    oscillator.frequency.setValueAtTime(freq * (0.5 + pct), audioCtx.currentTime);
+                }
+            });
+
             btnPrev.addEventListener('click', () => {
                 if (isVideoMode()) { video.currentTime = Math.max(0, video.currentTime - 10); return; }
-                mediaState.trackIndex = (mediaState.trackIndex - 1 + mediaState.tracks.length) % mediaState.tracks.length;
-                mediaState.currentTrack = mediaState.tracks[mediaState.trackIndex];
-                mediaState.progress = 0;
-                syncPlayerUI();
+                if (!audioCtx) { startAudio(); }
+                playTrack(mediaState.trackIndex - 1);
             });
             btnPlay.addEventListener('click', () => {
                 if (isVideoMode()) {
                     if (video.paused) video.play(); else video.pause();
-                    syncPlayerUI();
-                    return;
+                    syncPlayerUI(); return;
                 }
-                mediaState.playing = !mediaState.playing;
+                if (!mediaState.playing) {
+                    if (!oscillator) { playTrack(mediaState.trackIndex); return; }
+                    mediaState.playing = true;
+                    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+                    drawViz();
+                } else {
+                    mediaState.playing = false;
+                    if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null; }
+                }
                 syncPlayerUI();
             });
             btnStop.addEventListener('click', () => {
                 if (isVideoMode()) { video.pause(); video.currentTime = 0; syncPlayerUI(); return; }
                 mediaState.playing = false;
                 mediaState.progress = 0;
+                stopOsc();
+                fill.style.width = '0%';
+                ctx.fillStyle = 'rgba(0,0,0,0.3)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
                 syncPlayerUI();
             });
             btnNext.addEventListener('click', () => {
                 if (isVideoMode()) { video.currentTime = Math.min(video.duration || 0, video.currentTime + 10); return; }
-                mediaState.trackIndex = (mediaState.trackIndex + 1) % mediaState.tracks.length;
-                mediaState.currentTrack = mediaState.tracks[mediaState.trackIndex];
-                mediaState.progress = 0;
-                syncPlayerUI();
+                if (!audioCtx) { startAudio(); }
+                playTrack(mediaState.trackIndex + 1);
             });
+            waveTypeEl.addEventListener('click', () => {
+                currentWave = (currentWave + 1) % waves.length;
+                if (oscillator) {
+                    oscillator.type = waves[currentWave];
+                }
+                waveTypeEl.innerHTML = 'Wave: <span style="font-weight:600;">' + waves[currentWave] + '</span>';
+            });
+
+            volSlider.addEventListener('input', () => {
+                const v = +volSlider.value;
+                volLabel.textContent = v + '%';
+                mediaState.volume = v;
+                if (gainNode) gainNode.gain.value = v / 100;
+                volIcon.textContent = v === 0 ? '\u{1F507}' : v < 30 ? '\u{1F509}' : '\u{1F50A}';
+            });
+
             video.addEventListener('timeupdate', syncPlayerUI);
             video.addEventListener('play', syncPlayerUI);
             video.addEventListener('pause', syncPlayerUI);
             video.addEventListener('ended', () => { video.currentTime = 0; syncPlayerUI(); });
+
             el._openVideo = function(dataUrl, name) {
                 if (!dataUrl) { info.textContent = 'No video data for: ' + name; return; }
+                stopOsc(); mediaState.playing = false;
                 video.src = dataUrl;
                 video.style.display = 'block';
                 canvas.style.display = 'none';
-                mediaState.playing = false;
                 mediaState.currentTrack = name;
                 video.load();
                 info.textContent = 'Now Playing: ' + name + ' (video)';
@@ -4385,49 +4994,16 @@ const apps = {
                 btnPlay.textContent = '\u{25B6}';
             };
             el._closeVideo = function() {
-                video.pause();
-                video.src = '';
+                video.pause(); video.src = '';
                 video.style.display = 'none';
                 canvas.style.display = 'block';
                 mediaState.currentTrack = mediaState.tracks[mediaState.trackIndex] || 'Ambient Waves \u{1F30A}';
                 btnPlay.textContent = '\u{25B6}';
                 syncPlayerUI();
             };
-            let t = 0;
-            const anim = setInterval(function() {
-                if (isVideoMode()) {
-                    if (!video.paused) {
-                        fill.style.width = video.duration ? (video.currentTime / video.duration * 100) + '%' : '0%';
-                    }
-                    return;
-                }
-                if (mediaState.playing) {
-                    t += 0.15;
-                    mediaState.progress = Math.min(100, mediaState.progress + 0.15);
-                    if (mediaState.progress >= 100) {
-                        mediaState.progress = 0;
-                        mediaState.trackIndex = (mediaState.trackIndex + 1) % mediaState.tracks.length;
-                        mediaState.currentTrack = mediaState.tracks[mediaState.trackIndex];
-                    }
-                    syncPlayerUI();
-                }
-                ctx.fillStyle = 'rgba(0,0,0,0.1)';
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-                if (mediaState.playing) {
-                    ctx.strokeStyle = '#33ff33';
-                } else {
-                    ctx.strokeStyle = 'rgba(51,255,51,0.2)';
-                }
-                ctx.lineWidth = 1.5;
-                ctx.beginPath();
-                for (let x = 0; x < canvas.width; x++) {
-                    const y = canvas.height / 2 + Math.sin(x * 0.05 + t) * 20 + Math.sin(x * 0.02 + t * 2) * 10;
-                    ctx.lineTo(x, y);
-                }
-                ctx.stroke();
-            }, 50);
+
             syncPlayerUI();
-            cleanups[id] = function() { video.pause(); video.src = ''; clearInterval(anim); };
+            cleanups[id] = function() { video.pause(); video.src = ''; stopOsc(); if (audioCtx) audioCtx.close(); };
         }
     },
     controlpanel: {
@@ -7523,31 +8099,90 @@ function showAvatarPicker(callback) {
 // === Welcome Tour ===
 function showWelcomeTour() {
     if (localStorage.getItem('cyberos_tour_done')) return;
-    const steps = [
-        { msg:'Welcome to Cyber OS! Click "Next" for a quick tour.', x:'50%', y:'30%' },
-        { msg:'Your desktop with app icons. Double-click to launch.', x:'100px', y:'60px' },
-        { msg:'The taskbar shows running apps and system tray.', x:'50%', y:'95%' },
-        { msg:'Click your profile to open the Start menu.', x:'30px', y:'40px' },
+    var tourActive = true;
+    var tourToast = null;
+    var tourStep = 0;
+    var tourSteps = [
+        { msg: '<b>\u{1F680} Welcome to Cyber OS!</b><br>A full web desktop experience. Click <b>Next</b> for a quick tour or <b>Finish</b> to skip.', sel: null },
+        { msg: '<b>\u{1F4C1} Desktop Icons</b><br>Double-click any icon to launch an app. Right-click empty desktop area to add/remove icons, sort, or create new folders/files.', sel: '#desktop-icons' },
+        { msg: '<b>\u{2757} Window Title Bar</b><br>Right-click any window\u2019s title bar for: Add/Remove from desktop, Restore, Minimize, Maximize, and Close.', sel: null },
+        { msg: '<b>\u{1F9EE} Window Controls</b><br>Every window has: close (\u2715), minimize (\u2014), maximize (\u25A1), always-on-top (\u{1F4CC}), and desktop (\u{1F5A5}) buttons.', sel: null },
+        { msg: '<b>\u{2194} Drag & Snap</b><br>Drag windows by the title bar. Snap to screen edges (left/right halves, corners, top half). Hover maximize button for snap layout options.', sel: null },
+        { msg: '<b>\u{1F50D} Taskbar Search</b><br>Use the search bar on the taskbar to quickly find and launch any app.', sel: '#taskbar-search' },
+        { msg: '<b>\u{1F4CB} Taskbar</b><br>Running apps appear here. Click to focus, right-click for pin/unpin/add/remove/close. Click again to minimize.', sel: '#taskbar' },
+        { msg: '<b>\u{25BC} Show Desktop</b><br>The thin vertical bar on the right side of the taskbar hides/shows all windows instantly.', sel: '#show-desktop-btn' },
+        { msg: '<b>\u{23F0} System Tray</b><br>Click tray icons for: clock & calendar, network, volume, battery, action center (Wi-Fi, Bluetooth, Night Light), hidden icons.', sel: '#system-tray' },
+        { msg: '<b>\u{25B6} Start Menu</b><br>Click your profile badge on the taskbar to open the Start menu. Browse all apps, search, access Settings, power options.', sel: '#username-display' },
+        { msg: '<b>\u{1F5A5} Top-Right Widgets</b><br>Analog clock, calendar, and media player widgets. Customize in Settings > Widgets.', sel: '#top-widgets' },
+        { msg: '<b>\u{1F5BC} Desktop Right-Click</b><br>Right-click desktop: refresh, show/hide icons, sort, add/remove desktop icons, create new folders or text documents.', sel: null },
+        { msg: '<b>\u{1F3AE} Gaming Hub</b><br>Built-in games: Snake, Tic Tac Toe, Solitaire, Minesweeper, Blackjack, Memory, 2048, Pac-Man. Track high scores!', sel: null },
+        { msg: '<b>\u{1F5A5} Built-in Apps</b><br>File Explorer, Notepad, Calculator, AI Chat, Calendar, Todo, Paint, Snipping Tool, Media Player, Terminal, PowerShell, Ubuntu, Photos, Camera, Settings, Task Manager, and more.', sel: null },
+        { msg: '<b>\u{2328} Keyboard Shortcuts</b><br><code>Ctrl+K</code> \u2014 Command Palette<br><code>Alt+Tab</code> \u2014 Switch windows<br><code>Win+D</code> \u2014 Show desktop', sel: null },
+        { msg: '<b>\u{1F44D} You\u2019re all set!</b><br>Explore and have fun. This tour won\u2019t show again.', sel: null },
     ];
-    let step = 0;
-    function showStep() {
-        if (step >= steps.length) { localStorage.setItem('cyberos_tour_done', '1'); return; }
-        const s = steps[step];
-        const toast = document.createElement('div');
-        toast.style.cssText = 'position:fixed;z-index:999999;background:var(--bg2);border:2px solid var(--accent);border-radius:8px;padding:16px;max-width:300px;box-shadow:0 8px 40px rgba(0,0,0,0.5);animation:toast-in 0.3s ease-out;';
-        toast.style.left = s.x; toast.style.top = s.y; toast.style.transform = 'translate(-50%,-50%)';
-        toast.innerHTML = '<div style="font-size:0.85rem;margin-bottom:10px;">' + s.msg + '</div><div style="display:flex;gap:8px;justify-content:flex-end;"><button id="tour-next" style="margin:0;padding:4px 14px;font-size:0.8rem;">' + (step < steps.length - 1 ? 'Next \u25B6' : 'Finish \u2713') + '</button></div>';
-        document.body.appendChild(toast);
-        document.getElementById('tour-next').onclick = function() { toast.remove(); step++; showStep(); };
-        const prev = document.getElementById('tour-prev');
-        if (prev) { prev.onclick = function() { toast.remove(); step = Math.max(0, step - 1); showStep(); }; }
+    function tourEnd() {
+        tourActive = false;
+        localStorage.setItem('cyberos_tour_done', '1');
+        document.querySelectorAll('.tour-highlight').forEach(function(el) { el.classList.remove('tour-highlight'); });
+        if (tourToast && tourToast.parentNode) tourToast.remove();
+        tourToast = null;
     }
-    setTimeout(showStep, 2000);
+    function tourShowStep() {
+        if (!tourActive) return;
+        if (tourStep >= tourSteps.length) { tourEnd(); return; }
+        document.querySelectorAll('.tour-highlight').forEach(function(el) { el.classList.remove('tour-highlight'); });
+        var s = tourSteps[tourStep];
+        var targetEl = s.sel ? document.querySelector(s.sel) : null;
+        if (targetEl) targetEl.classList.add('tour-highlight');
+        if (!tourToast) { tourToast = document.createElement('div'); tourToast.id = 'tour-toast'; document.body.appendChild(tourToast); }
+        var maxW = 340;
+        var pad = 14;
+        var baseStyle = 'position:fixed;z-index:9999999;background:var(--bg2);border:2px solid var(--accent);border-radius:10px;padding:18px 20px;max-width:' + maxW + 'px;box-shadow:0 12px 48px rgba(0,0,0,0.6);font-size:0.85rem;line-height:1.5;animation:toast-in 0.3s ease-out;';
+        tourToast.innerHTML = '<div style="margin-bottom:12px;">' + s.msg + '</div>' +
+            '<div style="display:flex;gap:6px;justify-content:space-between;align-items:center;">' +
+            '<span style="font-size:0.7rem;opacity:0.4;">' + (tourStep + 1) + ' / ' + tourSteps.length + '</span>' +
+            '<div style="display:flex;gap:6px;">' +
+            '<button class="tour-finish-btn" style="margin:0;padding:5px 10px;font-size:0.75rem;background:transparent;border:1px solid var(--danger);color:var(--danger);border-radius:5px;cursor:pointer;">Finish</button>' +
+            '<button class="tour-next-btn" style="margin:0;padding:5px 14px;font-size:0.78rem;background:var(--accent);color:#fff;border:none;border-radius:5px;cursor:pointer;font-weight:600;">' + (tourStep < tourSteps.length - 1 ? 'Next \u25B6' : 'Done \u2713') + '</button>' +
+            '</div></div>';
+        if (targetEl) {
+            var tr = targetEl.getBoundingClientRect();
+            var cx = Math.round(tr.left + tr.width / 2);
+            var cy = Math.round(tr.top + tr.height / 2);
+            var idealLeft, idealTop;
+            if (cy < window.innerHeight / 2) {
+                idealLeft = Math.round(cx - maxW / 2);
+                idealTop = tr.bottom + pad;
+            } else {
+                idealLeft = Math.round(cx - maxW / 2);
+                idealTop = tr.top - pad;
+            }
+            tourToast.style.cssText = baseStyle + 'left:0;top:0;transform:none;visibility:hidden;max-height:60vh;overflow-y:auto;';
+            var tw = tourToast.offsetWidth || maxW;
+            var th = tourToast.offsetHeight || 200;
+            var clampL = Math.max(pad, Math.min(idealLeft, window.innerWidth - tw - pad));
+            var clampT;
+            if (cy < window.innerHeight / 2) {
+                clampT = Math.max(pad, Math.min(idealTop, window.innerHeight - th - pad));
+            } else {
+                clampT = Math.max(pad, Math.min(idealTop - th, window.innerHeight - th - pad));
+            }
+            tourToast.style.cssText = baseStyle + 'left:' + clampL + 'px;top:' + clampT + 'px;transform:none;max-height:60vh;overflow-y:auto;';
+        } else {
+            tourToast.style.cssText = baseStyle + 'left:50%;top:40%;transform:translate(-50%,-50%);max-height:60vh;overflow-y:auto;';
+        }
+        var nextBtn = tourToast.querySelector('.tour-next-btn');
+        var finishBtn = tourToast.querySelector('.tour-finish-btn');
+        nextBtn.onclick = function() { tourStep++; tourShowStep(); };
+        finishBtn.onclick = function() { tourEnd(); };
+    }
+    setTimeout(tourShowStep, 1500);
 }
 
 // === Taskbar Context Menu ===
 taskbar.addEventListener('contextmenu', function(e) {
     e.preventDefault();
+    e.stopPropagation();
     const btn = e.target.closest('.taskbar-btn');
     const menu = document.createElement('div');
     menu.style.cssText = 'position:fixed;z-index:100001;background:var(--bg2);border:2px solid var(--border);border-radius:4px;box-shadow:0 4px 20px var(--shadow);min-width:160px;padding:4px 0;font-size:0.75rem;';
@@ -7558,6 +8193,8 @@ taskbar.addEventListener('contextmenu', function(e) {
         const isPinned = _pinnedApps.includes(app);
         html += '<div class="cm-item" data-action="pin-' + app + '">' + (isPinned ? '\u{1F4CC} Unpin from taskbar' : '\u{1F4CC} Pin to taskbar') + '</div>';
         html += '<div class="cm-item" data-action="close-' + app + '">\u{2715} Close all windows</div>';
+        const onDesktop = iconApps.some(a => a.t === app);
+        html += '<div class="cm-item" data-action="desktop-' + app + '">' + (onDesktop ? '\u{1F5D1} Remove from desktop' : '\u{1F5A5} Add to desktop') + '</div>';
     }
     html += '<div class="cm-separator"></div>';
     html += '<div class="cm-item" data-action="add-taskbar">\u{2795} Add taskbar icon</div>';
@@ -7583,6 +8220,9 @@ taskbar.addEventListener('contextmenu', function(e) {
                 else _pinnedApps.push(a);
                 localStorage.setItem('cyberos_pinned', JSON.stringify(_pinnedApps));
                 showToast('Taskbar', _pinnedApps.includes(a) ? 'Pinned ' + a : 'Unpinned ' + a, 'info');
+            } else if (action.startsWith('desktop-')) {
+                const a = action.slice(8);
+                toggleDesktopIcon(a);
             } else if (action.startsWith('close-')) {
                 const a = action.slice(6);
                 openWindows.filter(w => w.startsWith(a + '-')).forEach(id => closeWindow(id));
@@ -7602,12 +8242,11 @@ taskbar.addEventListener('contextmenu', function(e) {
 function applyPinnedApps() {
     const tb = document.querySelector('.taskbar-buttons');
     if (!tb) return;
-    document.querySelectorAll('.taskbar-btn[data-pinned]').forEach(b => b.remove());
+    tb.querySelectorAll('.taskbar-btn').forEach(b => b.remove());
     _pinnedApps.forEach(app => {
         const btn = document.createElement('button');
         btn.className = 'taskbar-btn';
         btn.dataset.app = app;
-        btn.dataset.pinned = '1';
         btn.title = app;
         const icons = { fileexplorer:'\u{1F4C1}', recyclebin:'\u{1F5D1}', notes:'\u{1F4DD}', calendar:'\u{1F4C5}', calc:'\u{1F9EE}', todo:'\u2705', ai:'\u{1F916}', settings:'\u2699\uFE0F', taskmgr:'\u{1F4CA}', gaminghub:'\u{1F3AE}', highscores:'\u{1F3C6}', wallpapers:'\u{1F5BC}', brave:'\u{1F981}', terminal:'\u{1F5A5}', powershell:'\u{1FA9F}', ubuntu:'\u{1F427}', snip:'\u{2702}\uFE0F', paint:'\u{1F3A8}', mediaplayer:'\u{1F3B5}', controlpanel:'\u2699' };
         btn.textContent = icons[app] || '\u{1F4C4}';
@@ -7640,24 +8279,27 @@ function toggleMultiMonitor() {
 // === Top-Right Widgets ===
 function drawClockFace(canvas) {
     if (!canvas) return;
-    const rect = canvas.parentElement.getBoundingClientRect();
-    const size = Math.min(rect.width, rect.height) || 180;
-    const dpr = window.devicePixelRatio || 1;
+    var fg = canvas._themeFg || '#33ff33';
+    var accent = canvas._themeAccent || '#33ff33';
+    var rect = canvas.parentElement.getBoundingClientRect();
+    var size = Math.min(rect.width, rect.height) || 180;
+    var dpr = window.devicePixelRatio || 1;
     canvas.width = size * dpr;
     canvas.height = size * dpr;
-    const ctx = canvas.getContext('2d');
+    var ctx = canvas.getContext('2d');
     ctx.scale(dpr, dpr);
 
-    const cx = size / 2;
-    const cy = size / 2;
-    const r = size * 0.4;
+    var cx = size / 2;
+    var cy = size / 2;
+    var r = size * 0.4;
 
     ctx.clearRect(0, 0, size, size);
 
     // Outer ring glow
     ctx.beginPath();
     ctx.arc(cx, cy, r + 4, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(51,255,51,0.03)';
+    ctx.fillStyle = fg.replace(')', ',0.03)').replace('rgb', 'rgba');
+    if (ctx.fillStyle === fg) ctx.fillStyle = 'rgba(51,255,51,0.03)';
     ctx.fill();
 
     // Face
@@ -7665,39 +8307,41 @@ function drawClockFace(canvas) {
     ctx.arc(cx, cy, r, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(2,8,19,0.7)';
     ctx.fill();
-    ctx.strokeStyle = 'rgba(51,255,51,0.25)';
+    ctx.strokeStyle = fg.replace(')', ',0.25)').replace('rgb', 'rgba');
+    if (ctx.strokeStyle === fg) ctx.strokeStyle = 'rgba(51,255,51,0.25)';
     ctx.lineWidth = 1.5;
     ctx.stroke();
 
     // Hour markers
-    for (let i = 0; i < 12; i++) {
-        const angle = (i * 30 - 90) * Math.PI / 180;
-        const isMain = i % 3 === 0;
-        const outer = r;
-        const inner = isMain ? r * 0.82 : r * 0.9;
+    for (var i = 0; i < 12; i++) {
+        var angle = (i * 30 - 90) * Math.PI / 180;
+        var isMain = i % 3 === 0;
+        var outer = r;
+        var inner = isMain ? r * 0.82 : r * 0.9;
         ctx.beginPath();
         ctx.moveTo(cx + Math.cos(angle) * inner, cy + Math.sin(angle) * inner);
         ctx.lineTo(cx + Math.cos(angle) * outer, cy + Math.sin(angle) * outer);
-        ctx.strokeStyle = isMain ? 'rgba(51,255,51,0.9)' : 'rgba(51,255,51,0.35)';
+        ctx.strokeStyle = isMain ? fg : fg.replace(')', ',0.35)').replace('rgb', 'rgba');
+        if (!isMain && ctx.strokeStyle === fg) ctx.strokeStyle = 'rgba(51,255,51,0.35)';
         ctx.lineWidth = isMain ? 2.5 : 1;
         ctx.stroke();
     }
 
-    const now = new Date();
-    const h = now.getHours() % 12;
-    const m = now.getMinutes();
-    const s = now.getSeconds();
-    const ms = now.getMilliseconds();
+    var now = new Date();
+    var h = now.getHours() % 12;
+    var m = now.getMinutes();
+    var s = now.getSeconds();
+    var ms = now.getMilliseconds();
 
-    const hAngle = (h * 30 + m * 0.5 - 90) * Math.PI / 180;
-    const mAngle = (m * 6 + s * 0.1 - 90) * Math.PI / 180;
-    const sAngle = (s * 6 + ms * 0.006 - 90) * Math.PI / 180;
+    var hAngle = (h * 30 + m * 0.5 - 90) * Math.PI / 180;
+    var mAngle = (m * 6 + s * 0.1 - 90) * Math.PI / 180;
+    var sAngle = (s * 6 + ms * 0.006 - 90) * Math.PI / 180;
 
     // Hour hand
     ctx.beginPath();
     ctx.moveTo(cx, cy);
     ctx.lineTo(cx + Math.cos(hAngle) * r * 0.5, cy + Math.sin(hAngle) * r * 0.5);
-    ctx.strokeStyle = '#33ff33';
+    ctx.strokeStyle = fg;
     ctx.lineWidth = 3;
     ctx.lineCap = 'round';
     ctx.stroke();
@@ -7706,7 +8350,7 @@ function drawClockFace(canvas) {
     ctx.beginPath();
     ctx.moveTo(cx, cy);
     ctx.lineTo(cx + Math.cos(mAngle) * r * 0.68, cy + Math.sin(mAngle) * r * 0.68);
-    ctx.strokeStyle = '#33ff33';
+    ctx.strokeStyle = fg;
     ctx.lineWidth = 2;
     ctx.lineCap = 'round';
     ctx.stroke();
@@ -7715,7 +8359,8 @@ function drawClockFace(canvas) {
     ctx.beginPath();
     ctx.moveTo(cx - Math.cos(sAngle) * r * 0.12, cy - Math.sin(sAngle) * r * 0.12);
     ctx.lineTo(cx + Math.cos(sAngle) * r * 0.78, cy + Math.sin(sAngle) * r * 0.78);
-    ctx.strokeStyle = 'rgba(51,255,51,0.5)';
+    ctx.strokeStyle = accent.replace(')', ',0.5)').replace('rgb', 'rgba');
+    if (ctx.strokeStyle === accent) ctx.strokeStyle = 'rgba(51,255,51,0.5)';
     ctx.lineWidth = 1;
     ctx.lineCap = 'round';
     ctx.stroke();
@@ -7723,7 +8368,7 @@ function drawClockFace(canvas) {
     // Center cap
     ctx.beginPath();
     ctx.arc(cx, cy, 3.5, 0, Math.PI * 2);
-    ctx.fillStyle = '#33ff33';
+    ctx.fillStyle = accent;
     ctx.fill();
     ctx.beginPath();
     ctx.arc(cx, cy, 1.5, 0, Math.PI * 2);
@@ -7732,20 +8377,29 @@ function drawClockFace(canvas) {
 }
 
 function updateTopClock() {
-    const el = document.getElementById('tw-clock');
+    var el = document.getElementById('tw-clock');
     if (!el) return;
-    let canvas = el.querySelector('canvas');
+    var canvas = el.querySelector('canvas');
     if (!canvas) {
         canvas = document.createElement('canvas');
         el.appendChild(canvas);
-        const dateEl = document.createElement('div');
+        var dateEl = document.createElement('div');
         dateEl.className = 'tw-clock-date';
         el.appendChild(dateEl);
     }
+    if (canvas._needsRedraw || !canvas._themeFg) {
+        var themeName = localStorage.getItem('cyberos_widget_theme') || 'cyber';
+        var theme = widgetThemes[themeName] || widgetThemes.cyber;
+        canvas._themeFg = theme.fg;
+        canvas._themeAccent = theme.accent;
+        canvas._themeBorder = theme.border;
+        canvas._needsRedraw = false;
+    }
+    canvas._now = Date.now();
     drawClockFace(canvas);
-    const dateEl = el.querySelector('.tw-clock-date');
+    var dateEl = el.querySelector('.tw-clock-date');
     if (dateEl) {
-        const now = new Date();
+        var now = new Date();
         dateEl.textContent = now.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
     }
 }
@@ -7793,27 +8447,59 @@ function getTrackArt(index) {
 }
 
 function syncMiniMedia() {
-    const infoEl = document.querySelector('#tw-media .tw-media-info');
-    const fillEl = document.querySelector('#tw-media .tw-media-progress-fill');
-    const playBtn = document.querySelector('#tw-media .tw-media-buttons button:nth-child(2)');
-    const volEl = document.querySelector('#tw-media .tw-media-volume span');
-    const volInput = document.querySelector('#tw-media .tw-media-volume input');
-    const artBg = document.querySelector('#tw-media .tw-media-art-bg');
-    const artEmoji = document.querySelector('#tw-media .tw-media-art-emoji');
-    const art = getTrackArt(mediaState.trackIndex);
-    if (infoEl) infoEl.textContent = mediaState.currentTrack;
-    if (fillEl) fillEl.style.width = mediaState.progress + '%';
-    if (playBtn) playBtn.textContent = mediaState.playing ? '\u{23F8}' : '\u{25B6}';
+    var el = document.getElementById('tw-media');
+    var infoEl = document.querySelector('#tw-media .tw-media-info');
+    var fillEl = document.querySelector('#tw-media .tw-media-progress-fill');
+    var playBtn = document.querySelector('#tw-media .tw-media-buttons button:nth-child(2)');
+    var volEl = document.querySelector('#tw-media .tw-media-volume span');
+    var volInput = document.querySelector('#tw-media .tw-media-volume input');
+    var artBg = document.querySelector('#tw-media .tw-media-art-bg');
+    var artEmoji = document.querySelector('#tw-media .tw-media-art-emoji');
+
+    var hasPageMedia = pageActiveMedia && !pageActiveMedia.paused && !pageActiveMedia.ended;
+    var hasOsMedia = mediaState.playing;
+
+    if (!hasPageMedia && !hasOsMedia) {
+        if (el && !el.classList.contains('tw-media-blank')) {
+            el.classList.add('tw-media-blank');
+            if (infoEl) infoEl.textContent = '';
+            if (fillEl) fillEl.style.width = '0%';
+            if (playBtn) playBtn.textContent = '\u{25B6}';
+        }
+        updateMediaSessionMetadata();
+        return;
+    }
+
+    if (el) el.classList.remove('tw-media-blank');
+
+    if (hasPageMedia) {
+        var src = pageActiveMedia.currentSrc || '';
+        var name = decodeURIComponent(src.split('/').pop().split('?')[0] || 'Media');
+        if (infoEl) infoEl.textContent = name;
+        if (fillEl && pageActiveMedia.duration) {
+            fillEl.style.width = (pageActiveMedia.currentTime / pageActiveMedia.duration * 100) + '%';
+        }
+        if (playBtn) playBtn.textContent = pageActiveMedia.paused ? '\u{25B6}' : '\u{23F8}';
+        if (artBg) artBg.style.background = 'linear-gradient(135deg, #2d3436, #636e72)';
+        if (artEmoji) artEmoji.textContent = '\u{1F3AC}';
+    } else {
+        var art = getTrackArt(mediaState.trackIndex);
+        if (infoEl) infoEl.textContent = mediaState.currentTrack;
+        if (fillEl) fillEl.style.width = mediaState.progress + '%';
+        if (playBtn) playBtn.textContent = mediaState.playing ? '\u{23F8}' : '\u{25B6}';
+        if (artBg) artBg.style.background = art.bg;
+        if (artEmoji) artEmoji.textContent = art.emoji;
+    }
+
     if (volEl) volEl.textContent = mediaState.volume + '%';
     if (volInput) volInput.value = mediaState.volume;
-    if (artBg) artBg.style.background = art.bg;
-    if (artEmoji) artEmoji.textContent = art.emoji;
+    updateMediaSessionMetadata();
 }
 
 function initMiniMedia() {
-    const el = document.getElementById('tw-media');
+    var el = document.getElementById('tw-media');
     if (!el) return;
-    const art = getTrackArt(mediaState.trackIndex);
+    var art = getTrackArt(mediaState.trackIndex);
     el.innerHTML = '<div class="tw-media-art"><div class="tw-media-art-bg" style="background:' + art.bg + ';"></div><div class="tw-media-art-emoji">' + art.emoji + '</div></div>'
         + '<div class="tw-media-info">' + mediaState.currentTrack + '</div>'
         + '<div class="tw-media-buttons">'
@@ -7824,9 +8510,23 @@ function initMiniMedia() {
         + '<div class="tw-media-progress"><div class="tw-media-progress-fill" style="width:' + mediaState.progress + '%;"></div></div>'
         + '<div class="tw-media-volume"><span>\u{1F50A}</span><input type="range" min="0" max="100" value="' + mediaState.volume + '"><span>' + mediaState.volume + '%</span></div>';
     el.addEventListener('click', function(e) {
-        const btn = e.target.closest('[data-tw-m]');
+        var btn = e.target.closest('[data-tw-m]');
         if (!btn) return;
-        const action = btn.dataset.twM;
+        var action = btn.dataset.twM;
+
+        // If page media is active, control it instead
+        if (pageActiveMedia && !pageActiveMedia.paused && !pageActiveMedia.ended) {
+            if (action === 'play') {
+                pageActiveMedia.pause();
+            } else if (action === 'prev') {
+                pageActiveMedia.currentTime = Math.max(0, pageActiveMedia.currentTime - 10);
+            } else if (action === 'next') {
+                pageActiveMedia.currentTime = Math.min(pageActiveMedia.duration || 0, pageActiveMedia.currentTime + 10);
+            }
+            syncMiniMedia();
+            return;
+        }
+
         if (action === 'prev') {
             mediaState.trackIndex = (mediaState.trackIndex - 1 + mediaState.tracks.length) % mediaState.tracks.length;
             mediaState.currentTrack = mediaState.tracks[mediaState.trackIndex];
@@ -7840,12 +8540,152 @@ function initMiniMedia() {
         }
         syncMiniMedia();
     });
-    const volInput = el.querySelector('.tw-media-volume input');
+    var volInput = el.querySelector('.tw-media-volume input');
     if (volInput) {
         volInput.addEventListener('input', function() {
             mediaState.volume = parseInt(this.value);
             syncMiniMedia();
         });
+    }
+    setupPageMediaTracking();
+    setupMediaSession();
+    el.classList.add('tw-media-blank');
+    syncMiniMedia();
+}
+
+const widgetThemes = {
+    cyber: { name: 'Cyber', icon: '\u{1F7E2}', fg: '#33ff33', accent: '#33ff33', bg: 'rgba(22,14,34,0.8)', border: 'rgba(51,255,51,0.2)' },
+    warm: { name: 'Warm', icon: '\u{1F7E0}', fg: '#ff8c42', accent: '#ff8c42', bg: 'rgba(34,22,14,0.8)', border: 'rgba(255,140,66,0.2)' },
+    ocean: { name: 'Ocean', icon: '\u{1F535}', fg: '#42c6ff', accent: '#42c6ff', bg: 'rgba(14,22,34,0.8)', border: 'rgba(66,198,255,0.2)' },
+    mono: { name: 'Mono', icon: '\u{26AA}', fg: '#e0e0e0', accent: '#ffffff', bg: 'rgba(20,20,20,0.8)', border: 'rgba(255,255,255,0.1)' },
+    accent: { name: 'Accent', icon: '\u{1F3A8}', fg: 'var(--fg)', accent: 'var(--accent)', bg: 'var(--bg2)', border: 'var(--border)' },
+};
+
+function applyWidgetTheme() {
+    var themeName = localStorage.getItem('cyberos_widget_theme') || 'cyber';
+    var theme = widgetThemes[themeName] || widgetThemes.cyber;
+    var widgets = document.querySelectorAll('#top-widgets > div');
+    widgets.forEach(function(el) {
+        el.style.setProperty('--widget-fg', theme.fg);
+        el.style.setProperty('--widget-accent', theme.accent);
+        el.style.setProperty('--widget-bg', theme.bg);
+        el.style.setProperty('--widget-border', theme.border);
+    });
+    // Update clock face colors
+    var clockCanvas = document.querySelector('#tw-clock canvas');
+    if (clockCanvas) clockCanvas._needsRedraw = true;
+}
+
+// ===== Page Media Tracking =====
+var pageActiveMedia = null;
+var pageMediaTracked = false;
+
+function findActivePageMedia() {
+    var mediaEls = document.querySelectorAll('audio, video');
+    for (var i = 0; i < mediaEls.length; i++) {
+        var el = mediaEls[i];
+        if (!el.paused && !el.ended && el.readyState > 0) {
+            return el;
+        }
+    }
+    return null;
+}
+
+function setupPageMediaTracking() {
+    if (pageMediaTracked) return;
+    pageMediaTracked = true;
+
+    document.addEventListener('play', function(e) {
+        var target = e.target;
+        if (target && (target.tagName === 'AUDIO' || target.tagName === 'VIDEO')) {
+            pageActiveMedia = target;
+            syncMiniMedia();
+        }
+    }, true);
+
+    document.addEventListener('pause', function(e) {
+        var target = e.target;
+        if (target && (target.tagName === 'AUDIO' || target.tagName === 'VIDEO')) {
+            if (pageActiveMedia === target) {
+                pageActiveMedia = null;
+            }
+            syncMiniMedia();
+        }
+    }, true);
+
+    // Regularly check for any playing media
+    setInterval(function() {
+        var found = findActivePageMedia();
+        if (found && found !== pageActiveMedia) {
+            pageActiveMedia = found;
+            syncMiniMedia();
+        } else if (!found && pageActiveMedia) {
+            pageActiveMedia = null;
+            syncMiniMedia();
+        }
+    }, 1000);
+}
+
+// Media Session API integration
+function setupMediaSession() {
+    if ('mediaSession' in navigator) {
+        navigator.mediaSession.setActionHandler('play', function() {
+            if (pageActiveMedia) {
+                pageActiveMedia.play();
+            } else if (windowRegistry.mediaplayer) {
+                var content = windowRegistry.mediaplayer.querySelector('.window-content');
+                if (content && content._playMedia) content._playMedia();
+            }
+            syncMiniMedia();
+        });
+        navigator.mediaSession.setActionHandler('pause', function() {
+            if (pageActiveMedia) {
+                pageActiveMedia.pause();
+            } else if (windowRegistry.mediaplayer) {
+                var content = windowRegistry.mediaplayer.querySelector('.window-content');
+                if (content && content._pauseMedia) content._pauseMedia();
+            }
+            syncMiniMedia();
+        });
+        navigator.mediaSession.setActionHandler('previoustrack', function() {
+            if (pageActiveMedia) {
+                pageActiveMedia.currentTime = Math.max(0, pageActiveMedia.currentTime - 10);
+            } else {
+                var btn = document.querySelector('#tw-media [data-tw-m="prev"], .window-content [data-action="prev"]');
+                if (btn) btn.click();
+            }
+        });
+        navigator.mediaSession.setActionHandler('nexttrack', function() {
+            if (pageActiveMedia) {
+                pageActiveMedia.currentTime = Math.min(pageActiveMedia.duration || 0, pageActiveMedia.currentTime + 10);
+            } else {
+                var btn = document.querySelector('#tw-media [data-tw-m="next"], .window-content [data-action="next"]');
+                if (btn) btn.click();
+            }
+        });
+    }
+}
+
+function updateMediaSessionMetadata() {
+    if (!('mediaSession' in navigator)) return;
+    if (pageActiveMedia) {
+        var title = pageActiveMedia.currentSrc ? decodeURIComponent(pageActiveMedia.currentSrc.split('/').pop().split('?')[0] || 'Media') : 'Playing';
+        navigator.mediaSession.metadata = new MediaMetadata({
+            title: title,
+            artist: 'Cyber OS',
+            album: '',
+        });
+        navigator.mediaSession.playbackState = pageActiveMedia.paused ? 'paused' : 'playing';
+    } else if (mediaState.playing) {
+        navigator.mediaSession.metadata = new MediaMetadata({
+            title: mediaState.currentTrack || 'Ambient Waves',
+            artist: 'Cyber OS',
+            album: 'Desktop',
+        });
+        navigator.mediaSession.playbackState = 'playing';
+    } else {
+        navigator.mediaSession.metadata = null;
+        navigator.mediaSession.playbackState = 'none';
     }
 }
 
@@ -7859,6 +8699,7 @@ function applyWidgetSettings() {
         var trans = localStorage.getItem('cyberos_widget_' + name + '_transparent') === 'true';
         el.classList.toggle('widget-transparent', trans);
     });
+    applyWidgetTheme();
 }
 
 function initTopWidgets() {
@@ -7871,43 +8712,92 @@ function initTopWidgets() {
 }
 
 // === Init everything ===
-// Add new app buttons to taskbar
-(function(){
-    var tb = document.querySelector('.taskbar-buttons');
-    if (tb) {
-        var newApps = [
-            {a:'fileexplorer',i:'\u{1F4C1}',t:'File Explorer'},
-            {a:'recyclebin',i:'\u{1F5D1}',t:'Recycle Bin'},
-            {a:'brave',i:'\u{1F981}',t:'Brave Browser'},
-            {a:'terminal',i:'\u{1F5A5}',t:'Terminal'},
-            {a:'powershell',i:'\u{1FA9F}',t:'PowerShell'},
-            {a:'ubuntu',i:'\u{1F427}',t:'Ubuntu Terminal'},
-            {a:'snip',i:'\u{2702}\uFE0F',t:'Snipping Tool'},
-            {a:'paint',i:'\u{1F3A8}',t:'Paint'},
-            {a:'mediaplayer',i:'\u{1F3B5}',t:'Media Player'},
-            {a:'controlpanel',i:'\u2699',t:'Control Panel'},
-            {a:'photos',i:'\u{1F5BC}',t:'Photos'},
-            {a:'camera',i:'\u{1F4F7}',t:'Camera'},
-        ];
-        newApps.forEach(function(app) {
-            var existing = tb.querySelector('[data-app="' + app.a + '"]');
-            if (!existing) {
-                var btn = document.createElement('button');
-                btn.className = 'taskbar-btn';
-                btn.dataset.app = app.a;
-                btn.textContent = app.i;
-                btn.title = app.t;
-                tb.appendChild(btn);
-            }
-        });
-    }
+applyPinnedApps();
+
+// Apply saved cursor theme
+(function() {
+    var cur = localStorage.getItem('cyberos_cursor');
+    if (cur && cur !== 'default') document.body.classList.add('cursor-' + cur);
 })();
+
+// Init bongo cat
+(function() {
+    var bongoCat = document.getElementById('bongo-cat');
+    var bongoKeyDisplay = document.getElementById('bongo-key-display');
+    var bongoPawL = document.querySelector('.bongo-paw-left');
+    var bongoPawR = document.querySelector('.bongo-paw-right');
+    var bongoFace = document.querySelector('.bongo-face');
+    var bongoEnabled = localStorage.getItem('cyberos_bongo_enabled') !== 'false';
+    var desktopVisible = false;
+    function updateBongoVisibility() {
+        if (!bongoCat) return;
+        var show = bongoEnabled && desktopVisible;
+        bongoCat.classList.toggle('bongo-show', show);
+        bongoCat.classList.toggle('bongo-hidden', !show);
+    }
+    if (!bongoEnabled) updateBongoVisibility();
+    // Monitor desktop visibility
+    var desktopEl = document.getElementById('desktop');
+    function checkDesktopVisible() {
+        desktopVisible = desktopEl && !desktopEl.classList.contains('hidden');
+        updateBongoVisibility();
+    }
+    checkDesktopVisible();
+    var obs = new MutationObserver(checkDesktopVisible);
+    if (desktopEl) obs.observe(desktopEl, { attributes: true, attributeFilter: ['class'] });
+    var bongoHitTimeout;
+    var expressions = ['😼','😸','😺','😻'];
+    function bongoHit(e) {
+        if (!bongoEnabled) return;
+        if (e.repeat) return;
+        if (!bongoCat || !desktopVisible) return;
+        if (!bongoCat.classList.contains('bongo-show')) return;
+        var key = e.key;
+        if (key === ' ') key = '␣';
+        if (key.length > 1) key = '⌨';
+        else key = key.toUpperCase();
+        if (bongoKeyDisplay) {
+            bongoKeyDisplay.textContent = key;
+            bongoKeyDisplay.classList.remove('bongo-pop');
+            void bongoKeyDisplay.offsetWidth;
+            bongoKeyDisplay.classList.add('bongo-pop');
+        }
+        if (bongoPawL) {
+            bongoPawL.classList.remove('bongo-hit');
+            void bongoPawL.offsetWidth;
+            bongoPawL.classList.add('bongo-hit');
+        }
+        if (bongoPawR) {
+            bongoPawR.classList.remove('bongo-hit');
+            void bongoPawR.offsetWidth;
+            bongoPawR.classList.add('bongo-hit');
+        }
+        if (bongoFace) bongoFace.textContent = expressions[Math.floor(Math.random() * expressions.length)];
+        bongoCat.classList.add('bongo-glow');
+        clearTimeout(bongoHitTimeout);
+        bongoHitTimeout = setTimeout(function() {
+            if (bongoPawL) bongoPawL.classList.remove('bongo-hit');
+            if (bongoPawR) bongoPawR.classList.remove('bongo-hit');
+            if (bongoKeyDisplay) bongoKeyDisplay.classList.remove('bongo-pop');
+            if (bongoFace) bongoFace.textContent = '🐱';
+            if (bongoCat) bongoCat.classList.remove('bongo-glow');
+        }, 150);
+    }
+    document.addEventListener('keydown', bongoHit);
+    window.addEventListener('keydown', bongoHit);
+    // Expose toggle
+    window._setBongoEnabled = function(en) {
+        bongoEnabled = en;
+        localStorage.setItem('cyberos_bongo_enabled', en ? 'true' : 'false');
+        updateBongoVisibility();
+    };
+})();
+function toggleBongoCat(vis) {
+    if (window._setBongoEnabled) window._setBongoEnabled(vis);
+}
 
 // Init screensaver timer
 setTimeout(resetScreensaver, 3000);
-
-// Show welcome tour
-setTimeout(showWelcomeTour, 3000);
 
 // Toast on boot
 setTimeout(function(){ showToast('Cyber OS', 'Welcome back' + (currentUser ? ' ' + currentUser : '') + '! \u{1F680}', 'info'); }, 1500);
